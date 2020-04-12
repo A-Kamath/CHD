@@ -1,0 +1,169 @@
+#libraries needed for model selection
+library(MASS) 
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(leaps)
+library(purrr)
+library(ggplot2)
+library(e1071)
+library(naivebayes)
+library(psych)
+library(dplyr)
+
+#reading data
+heart<-read.csv("C:\\Users\\Akshay Kamath\\Documents\\2018-2019 Rutgers Assignments\\Heart.csv")
+train<-read.csv("C:\\Users\\Akshay Kamath\\Documents\\2018-2019 Rutgers Assignments\\train1.csv")
+test<-read.csv("C:\\Users\\Akshay Kamath\\Documents\\2018-2019 Rutgers Assignments\\test1.csv")
+heart$CHD <- heart$CHD - 1
+train$CHD <- train$CHD
+
+#Checking multicollinearity
+mat<-as.matrix(train)
+x.mat<-mat[,-14]
+cor.xma<-cor(x.mat)
+corinv<-solve(cor(x.mat))
+eigen<-eigen(cor(x.mat))
+
+#Creating GLM
+mylogit <- glm(CHD ~ ., data = train, family = "binomial")
+summary(mylogit)
+int <- glm(CHD ~ 1, data = train, family = "binomial")
+
+#Checking for influential points using Cook's Distance
+inf<-influence.measures(mylogit)
+logitcookd<-inf$infmat[,17]
+suspectcooks<-subset(logitcookd, logitcookd > 1)
+plot(logitcookd, xlab="Data Point", ylab="Cook's Distance")
+
+#Running Backwards Selection
+back <- stepAIC(mylogit, direction="backward")
+back$anova
+
+#Running Forward Selection
+forward <- stepAIC(int, scope=list(upper=~train$age + train$sex	+ train$pain	+ train$BP	+ train$cholesterol	+ train$sugar	+ train$ECG	+ train$HR	+ train$angina	
++ train$oldpeak	+ train$slope	+ train$number_vessels	+ train$thal,lower=~1), direction="forward")
+summary(forward)
+
+#Running Stepwise Selection
+step <- stepAIC(mylogit, direction="both")
+summary(step)
+
+#Running Best Subsets Selection
+bsub <- regsubsets(CHD~.,data = train, nvmax = 13)
+summary(bsub)
+res.sum <- summary(bsub)
+data.frame(
+  adjr2 = which.max(res.sum$adjr2),
+  CP = which.min(res.sum$cp),
+  BIC = which.min(res.sum$bic)
+)
+res.sum$cp
+
+#Creating GAM & Reduced GAM
+additive<-gam(CHD ~ age + sex + pain + s(BP) + cholesterol + sugar + ECG + s(HR) + angina + s(oldpeak) + slope + number_vessels + thal, family = "binomial", select=TRUE, data=(train))
+summary(additive)
+additive1<-gam(CHD ~ sex + pain + ECG + s(HR) + angina + s(oldpeak) + number_vessels + thal, family ="binomial", select=TRUE, data=(train))
+summary(additive1) 
+
+#Calculating Mallows' Cp
+mse<-sum(mylogit$residuals^2) / mylogit$df.residual
+RSS<-sum(mylogit$residuals^2)
+Cp<-1/203*(RSS + 2*14*mse)
+
+plot(train$age,train$HR)
+
+get_model_formula <- function(id, object, outcome){
+  models <- summary(object)$which[id,-1]
+  predictors <- names(which(models == TRUE))
+  predictors <- paste(predictors, collapse = "+")
+  as.formula(paste0(outcome, "~", predictors))
+}
+
+get_cv_error <- function(model.formula, data){
+  set.seed(1)
+  train.control <- trainControl(method = "cv", number = 5)
+  cv <- train(model.formula, data = data, method = "lm",
+              trControl = train.control)
+  cv$results$RMSE
+}
+
+
+model.ids <- 1:5
+cv.errors <-  map(model.ids, get_model_formula, bsub, "CHD") %>%
+  map(get_cv_error, data = train) %>%
+  unlist()
+cv.errors
+
+which.min(cv.errors)
+
+#plot
+agel<-glm(CHD~age,data=train,family=binomial(link="logit"))
+
+par(mfrow=c(1,1))
+par(mar = c(4, 4, 1, 1))
+plot(train$age,train$CHD)
+curve(predict(agel,data.frame(age=x),type="response"),add=TRUE)
+points(train$age,fitted(mylogit),pch=20)
+
+plot(train$number_vessels,train$CHD,type = "l")
+
+num<-glm(CHD~number_vessels,data=train,family=binomial(link="logit"))
+
+par(mfrow=c(1,1))
+par(mar = c(4, 4, 1, 1))
+plot(train$number_vessels,train$CHD)
+curve(predict(num,data.frame(number_vessels=x),type="response"),add=TRUE)
+points(train$age,fitted(num),pch=20)
+
+ggplot(train, aes(x=age,y=CHD)) + 
+  geom_point(shape=1, position=position_jitter(width=.05,height=.05)) + 
+  stat_smooth(method="glm", method.args=list(family="binomial"), se=FALSE)
+
+chol<-glm(CHD~cholesterol,data=train,family=binomial(link="logit"))
+
+par(mfrow=c(1,1))
+par(mar = c(4, 4, 1, 1))
+plot(train$cholesterol,train$CHD)
+curve(predict(chol,data.frame(cholesterol=x),type="response"),add=TRUE)
+
+repeating_sequence=rep.int(seq_len(nrow(train_df)), train_df$Freq)
+
+###Running Naive Bayes Classifier
+age_d <- cut(train$age, breaks = c(0, 30, 40, 50, 60, 70, 80))
+BP_d <- cut(train$BP, breaks = c(0, 100, 120, 140, 160, 180, 200))
+cholesterol_d <- cut(train$cholesterol, breaks = c(70, 160, 250, 340, 430, 520, 610))
+HR_d <- cut(train$HR, breaks = c(60, 85, 110, 135, 160, 185, 210))
+oldpeak_d <- cut(train$oldpeak, breaks = c(0, 1.1, 2.2, 3.3, 4.4, 5.5, 6.6))
+
+#Develop Naive Bayes Model with final model chosen above
+nbmodel3 <- naive_bayes(CHD2 ~ sex + pain + ECG + HR_d + angina + oldpeak_d + number_vessels + thal, data = train)
+pred3 <- predict(nbmodel3, train, type = 'prob')
+head(cbind(pred3,train))
+
+#Use to predict and make Confusion Matrix on training data
+p3 <- predict(nbmodel3, train)
+tab3 <- table(p3, train$CHD)
+1-sum(diag(tab3))/sum(tab3)
+
+#Use to predict and make Confusion Matrix on test data
+p4 <- predict(nbmodel3, test)
+tab4 <- table(p4, test$CHD)
+1-sum(diag(tab4))/sum(tab4)
+
+#Repeat Naive Bayes Classifier construction on full variable model for comparison
+nbmodel5 <- naive_bayes(CHD2 ~ age_d + sex + pain + BP_d + cholesterol_d + sugar + ECG + HR_d + angina
+                        + oldpeak_d + slope + number_vessels + thal, data = train)
+pred5 <- predict(nbmodel5, train, type = 'prob')
+head(cbind(pred5,train))
+
+p5 <- predict(nbmodel5, train)
+tab5 <- table(p5, train$CHD)
+tab5
+1-sum(diag(tab5))/sum(tab5)
+
+p6 <- predict(nbmodel5, test)
+tab6 <- table(p6, test$CHD)
+tab6
+1-sum(diag(tab6))/sum(tab6)
+
